@@ -1,0 +1,6 @@
+streamlit>=1.35.0
+networkx>=3.3
+pandas>=2.2.0
+matplotlib>=3.9.0
+pyvis>=0.3.2
+fpdf2>=2.7.9
