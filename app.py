@@ -11,6 +11,8 @@ from src.algorithms.chain_analysis import (
 from src.algorithms.cycle_detection import detectar_ciclos, detectar_ciclos_desde_cuenta
 from src.algorithms.smurfing import detectar_smurfing
 from src.algorithms.graph_renderer import render_path, render_smurfing
+from src.reports.pdf_report import generar_reporte_pdf
+from src.config import DEFAULT_MIN_AMOUNT, DEFAULT_MIN_TRANSACTIONS, DEFAULT_MAX_TRANSACTIONS
 
 
 st.set_page_config(page_title="Analisis de Fraude Bancario", layout="wide")
@@ -31,28 +33,10 @@ def cargar_grafo_desde_bytes(file_bytes: bytes):
     return load_graph_from_csv(buffer)
 
 
-def mostrar_cadena(resultado, grafo):
+def mostrar_resultado(resultado, grafo, es_ciclo=False):
     nodos_str = " → ".join(resultado["nodes"])
-    titulo = f"{nodos_str[:80]}... | {resultado['num_hops']} hops | ${resultado['total_amount']:,.2f}"
-
-    with st.expander(titulo):
-        pasos = [
-            {
-                "De": paso["from"],
-                "A": paso["to"],
-                "Monto": f"${paso['amount']:,.2f}",
-            }
-            for paso in resultado["steps"]
-        ]
-        st.table(pasos)
-
-        html = render_path(grafo, resultado)
-        components.html(html, height=450, scrolling=False)
-
-
-def mostrar_ciclo(resultado, grafo):
-    nodos_str = " → ".join(resultado["nodes"])
-    titulo = f"Ciclo: {nodos_str[:80]}... | {resultado['num_hops']} hops | ${resultado['total_amount']:,.2f}"
+    prefijo = "Ciclo: " if es_ciclo else ""
+    titulo = f"{prefijo}{nodos_str[:80]}... | {resultado['num_hops']} hops | ${resultado['total_amount']:,.2f}"
 
     with st.expander(titulo):
         pasos = [
@@ -81,6 +65,34 @@ try:
 except Exception as exc:
     st.error(f"No se pudo cargar el CSV: {exc}")
     st.stop()
+
+
+st.sidebar.divider()
+st.sidebar.header("Reportes")
+if st.sidebar.button("📄 Generar Reporte PDF"):
+    with st.spinner("Generando reporte... esto puede tardar un momento"):
+        stats = get_graph_stats(grafo)
+        cadena_larga = buscar_cadena_mas_larga(grafo)
+        cadena_sospechosa = buscar_cadena_sospechosa_mas_larga(
+            grafo, DEFAULT_MIN_AMOUNT, DEFAULT_MIN_TRANSACTIONS
+        )
+        todas_cadenas = buscar_todas_las_cadenas_sospechosas(
+            grafo, DEFAULT_MIN_AMOUNT, DEFAULT_MIN_TRANSACTIONS, DEFAULT_MAX_TRANSACTIONS
+        )
+        ciclos = detectar_ciclos(grafo)
+        smurfing = detectar_smurfing(grafo)
+        
+        pdf_bytes = generar_reporte_pdf(
+            stats, cadena_larga, cadena_sospechosa, 
+            todas_cadenas, ciclos, smurfing
+        )
+        
+        st.sidebar.download_button(
+            label="⬇️ Descargar Reporte PDF",
+            data=pdf_bytes,
+            file_name="reporte_fraude_bancario.pdf",
+            mime="application/pdf"
+        )
 
 
 # --- Tabs principales ---
@@ -117,7 +129,7 @@ with tab2:
     if st.button("Buscar cadena mas larga", key="btn_larga"):
         resultado = buscar_cadena_mas_larga(grafo)
         if resultado:
-            mostrar_cadena(resultado, grafo)
+            mostrar_resultado(resultado, grafo)
 
     st.divider()
     st.subheader("Cadena sospechosa mas larga")
@@ -128,7 +140,7 @@ with tab2:
     if st.button("Buscar cadena sospechosa mas larga", key="btn_sospechosa_larga"):
         resultado = buscar_cadena_sospechosa_mas_larga(grafo, monto_min, int(trans_min))
         if resultado:
-            mostrar_cadena(resultado, grafo)
+            mostrar_resultado(resultado, grafo)
         else:
             st.info("No se encontraron cadenas sospechosas.")
 
@@ -147,9 +159,9 @@ with tab2:
             int(trans_max_all),
         )
         if resultados:
-            st.success(f"Se encontraron {len(resultados)} cadenas.")
-            for res in resultados:
-                mostrar_cadena(res, grafo)
+            st.success(f"Se encontraron {len(resultados)} cadenas. (Mostrando top 20)")
+            for res in resultados[:20]:
+                mostrar_resultado(res, grafo)
         else:
             st.info("No se encontraron cadenas sospechosas.")
 
@@ -160,9 +172,9 @@ with tab3:
     if st.button("Detectar ciclos", key="btn_ciclos"):
         ciclos = detectar_ciclos(grafo)
         if ciclos:
-            st.success(f"Se encontraron {len(ciclos)} ciclos.")
-            for ciclo in ciclos:
-                mostrar_ciclo(ciclo, grafo)
+            st.success(f"Se encontraron {len(ciclos)} ciclos. (Mostrando top 20)")
+            for ciclo in ciclos[:20]:
+                mostrar_resultado(ciclo, grafo, es_ciclo=True)
         else:
             st.info("No se detectaron ciclos en el grafo.")
 
@@ -175,8 +187,8 @@ with tab4:
     if st.button("Detectar smurfing", key="btn_smurfing"):
         patrones = detectar_smurfing(grafo)
         if patrones:
-            st.success(f"Se encontraron {len(patrones)} patrones.")
-            for patron in patrones:
+            st.success(f"Se encontraron {len(patrones)} patrones. (Mostrando top 20)")
+            for patron in patrones[:20]:
                 titulo = (
                     f"Origen: {patron['origen']} → Destino: {patron['destino']}"
                     f" | {len(patron['intermediarios'])} intermediarios"
@@ -221,9 +233,9 @@ with tab5:
                 int(trans_max_acc),
             )
             if resultados:
-                st.success(f"Se encontraron {len(resultados)} cadenas.")
-                for res in resultados:
-                    mostrar_cadena(res, grafo)
+                st.success(f"Se encontraron {len(resultados)} cadenas. (Mostrando top 20)")
+                for res in resultados[:20]:
+                    mostrar_resultado(res, grafo)
             else:
                 st.info("No se encontraron cadenas sospechosas.")
 
@@ -231,8 +243,8 @@ with tab5:
         if st.button("Detectar ciclos desde esta cuenta", key="btn_ciclos_cuenta"):
             ciclos = detectar_ciclos_desde_cuenta(grafo, cuenta)
             if ciclos:
-                st.success(f"Se encontraron {len(ciclos)} ciclos.")
-                for ciclo in ciclos:
-                    mostrar_ciclo(ciclo, grafo)
+                st.success(f"Se encontraron {len(ciclos)} ciclos. (Mostrando top 20)")
+                for ciclo in ciclos[:20]:
+                    mostrar_resultado(ciclo, grafo, es_ciclo=True)
             else:
                 st.info("No se detectaron ciclos para esta cuenta.")

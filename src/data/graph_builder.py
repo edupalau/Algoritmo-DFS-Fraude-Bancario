@@ -42,7 +42,7 @@ def create_graph_dict_from_csv(filepath: str):
         if receiver_id not in aggregated:
             aggregated[receiver_id] = {}
 
-    # Gneramos el diccionario propiamente dicho que representa al grafo a partir del csv
+    # Generamos el diccionario propiamente dicho que representa al grafo a partir del csv
     graph_dict = {}
     for sender_id, targets in aggregated.items():
         neighbors = []
